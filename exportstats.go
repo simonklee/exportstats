@@ -365,6 +365,10 @@ func (srv *Server) Index(w http.ResponseWriter, r *http.Request, p httprouter.Pa
 
 	if err != nil {
 		log.Error(err)
+		if err == NotFoundErr {
+			http.Error(w, "Not Found: "+stat, http.StatusNotFound)
+			return
+		}
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
@@ -375,8 +379,20 @@ func (srv *Server) Index(w http.ResponseWriter, r *http.Request, p httprouter.Pa
 	switch format {
 	case "csv":
 		csvWriter(w, data)
+	case "json":
+		jsonWriter(w, data)
 	default:
 		fmt.Fprint(w, data)
+	}
+}
+
+func jsonWriter(w http.ResponseWriter, data *Dataset) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	jsonw := json.NewEncoder(w)
+	err := jsonw.Encode(data.Points)
+	if err != nil {
+		log.Fatal(err)
 	}
 }
 
