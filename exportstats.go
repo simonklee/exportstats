@@ -322,11 +322,11 @@ func (srv *Server) initRoutes() {
 
 	switch log.Severity {
 	case log.LevelDebug:
-		middleware = append(middleware, handler.LogHandler, handler.MeasureHandler, handler.DebugHandle, handler.RecoveryHandler)
+		middleware = append(middleware, nocacheHandler, handler.LogHandler, handler.MeasureHandler, handler.DebugHandle, handler.RecoveryHandler)
 	case log.LevelInfo:
-		middleware = append(middleware, handler.LogHandler, handler.RecoveryHandler)
+		middleware = append(middleware, nocacheHandler, handler.LogHandler, handler.RecoveryHandler)
 	default:
-		middleware = append(middleware, handler.RecoveryHandler)
+		middleware = append(middleware, nocacheHandler, handler.RecoveryHandler)
 	}
 
 	wrapped := handler.Use(router, middleware...)
@@ -413,4 +413,13 @@ func csvWriter(w http.ResponseWriter, data *Dataset) {
 	if err := csvw.Error(); err != nil {
 		log.Fatal(err)
 	}
+}
+
+func nocacheHandler(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-cache, no-store, max-age=0, must-revalidate")
+		w.Header().Set("Pragma", "no-cache")
+		w.Header().Set("Expires", "0")
+		h.ServeHTTP(w, r)
+	})
 }
