@@ -71,7 +71,10 @@ func (tf *Timeframe) UnmarshalJSON(data []byte) error {
 }
 
 func (tf Timeframe) String() string {
-	return fmt.Sprintf("%d%s@%d%s", tf.DurationValue, tf.DurationUnit, tf.IntervalValue, tf.IntervalUnit)
+	if tf.Start == nil {
+		return fmt.Sprintf("%d%s@%d%s", tf.DurationValue, tf.DurationUnit, tf.IntervalValue, tf.IntervalUnit)
+	}
+	return fmt.Sprintf("%d%s@%d%s-%d", tf.DurationValue, tf.DurationUnit, tf.IntervalValue, tf.IntervalUnit, tf.Start.Unix())
 }
 
 func (tf Timeframe) Format() string {
@@ -269,7 +272,6 @@ func (db *DB) invalidate() {
 	}
 }
 
-// TODO: use start as part of key
 func (db *DB) key(name string, tf Timeframe) string {
 	return name + tf.String()
 }
