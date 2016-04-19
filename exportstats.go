@@ -208,11 +208,11 @@ func (sh *StatHatFetcher) Get(name string, tf Timeframe) (*Dataset, error) {
 
 	uri := sh.baseURI + "/data/" + stat.ID + "?t=" + tf.Format()
 
-	log.Println(uri)
-
 	if tf.Start != nil {
 		uri += "&start=" + strconv.Itoa(int(tf.Start.Unix()))
 	}
+
+	log.Println(uri)
 
 	res, err := http.Get(uri)
 
