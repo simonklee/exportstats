@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -81,12 +82,22 @@ func (tf Timeframe) Format() string {
 	return fmt.Sprintf("%d%s%d%s", tf.DurationValue, tf.DurationUnit, tf.IntervalValue, tf.IntervalUnit)
 }
 
+var parseTimeframeRe = regexp.MustCompile("([0-9]+)([a-z]+)([0-9]+)([a-z]+)")
+
 func ParseTimeframe(v string) (Timeframe, error) {
 	tf := Timeframe{}
 	parts := strings.Split(v, " ")
 
 	if len(parts) != 5 {
-		return tf, errors.New("Parse Timeframe error")
+		parts = make([]string, 5)
+		match := parseTimeframeRe.FindAllStringSubmatch(v, -1)
+		if match == nil || len(match) != 1 || len(match[0]) != 5 {
+			return tf, errors.New("Parse Timeframe error")
+		}
+		parts[0] = match[0][1]
+		parts[1] = match[0][2]
+		parts[3] = match[0][3]
+		parts[4] = match[0][4]
 	}
 
 	var err error
@@ -95,6 +106,7 @@ func ParseTimeframe(v string) (Timeframe, error) {
 	if err != nil {
 		return tf, err
 	}
+
 	tf.DurationUnit, err = ParseTimeUnit(parts[1])
 
 	if err != nil {
@@ -209,7 +221,7 @@ func (sh *StatHatFetcher) Get(name string, tf Timeframe) (*Dataset, error) {
 	uri := sh.baseURI + "/data/" + stat.ID + "?t=" + tf.Format()
 
 	if tf.Start != nil {
-		uri += "&start=" + strconv.Itoa(int(tf.Start.Unix()))
+		uri += "&start=" + strconv.Itoa(int(tf.Start.Unix()/1000))
 	}
 
 	log.Println(uri)

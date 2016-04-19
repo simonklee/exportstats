@@ -14,12 +14,14 @@ func TestParseTimeframe(t *testing.T) {
 		{"1 hour @ 1 minut", false},
 		{"1 week @ 1 minute", true},
 		{"1 week@ 1 minute", false},
+		{"13w13m", true},
+		{"1w1m", true},
 	} {
 		tf, err := ParseTimeframe(test.value)
 
 		if err != nil {
 			if test.c {
-				t.Errorf("[%d] %s failed", i, test.value)
+				t.Errorf("[%d] %s failed: %v", i, test.value, err)
 			}
 		} else if !test.c {
 			t.Errorf("[%d] %s should have failed", i, test.value)
