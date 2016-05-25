@@ -387,7 +387,13 @@ func saferate(a, b float64) float64 {
 	if a <= 0 || b <= 0 {
 		return 0
 	}
-	return 1.0 - ((a - b) / a)
+	v := 1.0 - ((a - b) / a)
+
+	if v > 1 || v < 0 {
+		return 0
+	}
+
+	return v
 }
 
 func (db *DB) GetRate(a, b string, tf Timeframe) (*Dataset, error) {
