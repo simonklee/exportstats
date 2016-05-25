@@ -136,6 +136,75 @@ func MustParseTimeframe(v string) Timeframe {
 	return tf
 }
 
+type Duration struct {
+	Value int
+	Unit  TimeUnit
+}
+
+func (d *Duration) UnmarshalJSON(data []byte) error {
+	// trim " in beginning and end of JSON string
+	if len(data) >= 2 {
+		data = data[1 : len(data)-1]
+	}
+
+	_d, err := ParseDuration(string(data))
+
+	if err != nil {
+		return err
+	}
+
+	*d = _d
+	return nil
+}
+
+func (d Duration) String() string {
+	return fmt.Sprintf("%d%s", d.Value, d.Unit)
+}
+
+func (d Duration) Format() string {
+	return fmt.Sprintf("%d%s", d.Value, d.Unit)
+}
+
+var parseDurationRe = regexp.MustCompile("([0-9]+)([a-z]+)")
+
+func ParseDuration(v string) (Duration, error) {
+	d := Duration{}
+	parts := strings.Split(v, " ")
+
+	if len(parts) != 3 {
+		parts = make([]string, 3)
+		match := parseDurationRe.FindAllStringSubmatch(v, -1)
+		if match == nil || len(match) != 1 || len(match[0]) != 3 {
+			return d, errors.New("Parse Duration error")
+		}
+		parts[0] = match[0][1]
+		parts[1] = match[0][2]
+	}
+
+	var err error
+	d.Value, err = strconv.Atoi(parts[0])
+
+	if err != nil {
+		return d, err
+	}
+
+	d.Unit, err = ParseTimeUnit(parts[1])
+
+	if err != nil {
+		return d, err
+	}
+
+	return d, nil
+}
+
+func MustParseDuration(v string) Duration {
+	d, err := ParseDuration(v)
+	if err != nil {
+		panic(err.Error())
+	}
+	return d
+}
+
 type Point struct {
 	Time  int64   `json:"time"`
 	Value float64 `json:"value"`
@@ -314,6 +383,68 @@ func (db *DB) Get(name string, tf Timeframe) (*Dataset, error) {
 	return db.fetchRemote(name, tf)
 }
 
+func saferate(a, b float64) float64 {
+	if a <= 0 || b <= 0 {
+		return 0
+	}
+	return 1.0 - ((a - b) / a)
+}
+
+func (db *DB) GetRate(a, b string, tf Timeframe) (*Dataset, error) {
+	var dataa *Dataset
+	var datab *Dataset
+	var erra error
+	var errb error
+	var wg sync.WaitGroup
+
+	go func(stat string, tf Timeframe) {
+		dataa, erra = db.Get(stat, tf)
+		wg.Done()
+	}(a, tf)
+
+	go func(stat string, tf Timeframe) {
+		datab, errb = db.Get(stat, tf)
+		wg.Done()
+	}(b, tf)
+
+	wg.Add(2)
+	wg.Wait()
+
+	if erra != nil {
+		return nil, erra
+	}
+
+	if errb != nil {
+		return nil, errb
+	}
+
+	log.Println("stata", len(dataa.Points), "statb", len(datab.Points))
+
+	N := len(dataa.Points)
+	cutoff := N - len(datab.Points)
+	N -= cutoff
+
+	for i := 0; i < N; i++ {
+		pa := dataa.Points[i]
+		pb := datab.Points[i]
+
+		if pa.Time != pb.Time {
+			// TODO:
+			log.Errorf("time didn't match")
+		}
+
+		pa.Value = saferate(pa.Value, pb.Value)
+	}
+
+	if cutoff > 0 {
+		for i := N - 1; i < len(dataa.Points); i++ {
+			dataa.Points[i].Value = 0.0
+		}
+	}
+
+	return dataa, nil
+}
+
 type Server struct {
 	db *DB
 }
@@ -329,7 +460,8 @@ func NewServer(accessToken string) *Server {
 
 func (srv *Server) initRoutes() {
 	router := httprouter.New()
-	router.GET("/v1/exportstats/:stat", srv.Index)
+	router.GET("/v1/exportstats/stat/:stat", srv.IndexHandle)
+	router.GET("/v1/exportstats/rate/:stata/:statb", srv.RateHandle)
 
 	// global middleware
 	var middleware []func(http.Handler) http.Handler
@@ -347,7 +479,61 @@ func (srv *Server) initRoutes() {
 	http.Handle("/", wrapped)
 }
 
-func (srv *Server) Index(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
+func (srv *Server) RateHandle(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
+	stata := p.ByName("stata")
+	statb := p.ByName("statb")
+	log.Println(statb, statb, r.FormValue("t"))
+	var tf Timeframe
+
+	if t := r.FormValue("t"); t != "" {
+		_tf, err := ParseTimeframe(t)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		tf = _tf
+	} else {
+		tf = MustParseTimeframe("1 hour @ 1 minute")
+	}
+
+	if start := r.FormValue("start"); start != "" {
+		s, err := strconv.Atoi(start)
+
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		t := time.Unix(int64(s), 0)
+		tf.Start = &t
+	}
+
+	data, err := srv.db.GetRate(stata, statb, tf)
+
+	if err != nil {
+		log.Errorln(err)
+		if err == NotFoundErr {
+			http.Error(w, "Not Found: "+stata+" or "+statb, http.StatusNotFound)
+			return
+		}
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+
+	format := r.FormValue("format")
+	log.Println("count", len(data.Points))
+
+	switch format {
+	case "csv":
+		csvWriter(w, data)
+	case "json":
+		jsonWriter(w, data)
+	default:
+		fmt.Fprint(w, data)
+	}
+}
+
+func (srv *Server) IndexHandle(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
 	stat := p.ByName("stat")
 	log.Println(p.ByName("stat"), r.FormValue("t"))
 	var tf Timeframe
