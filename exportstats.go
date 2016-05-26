@@ -428,9 +428,13 @@ func (db *DB) GetRate(a, b string, tf Timeframe) (*Dataset, error) {
 
 	N := len(dataa.Points)
 	cutoff := N - len(datab.Points)
-	N -= cutoff
+	data := &Dataset{
+		Points:    make([]*Point, N),
+		Timeframe: dataa.Timeframe,
+		Name:      dataa.Name,
+	}
 
-	for i := 0; i < N; i++ {
+	for i := 0; i < N-cutoff; i++ {
 		pa := dataa.Points[i]
 		pb := datab.Points[i]
 
@@ -440,17 +444,17 @@ func (db *DB) GetRate(a, b string, tf Timeframe) (*Dataset, error) {
 			//log.Println("B", i, datab.Points)
 		}
 
-		pa.Value = saferate(pa.Value, pb.Value)
+		data.Points[i].Value = saferate(pa.Value, pb.Value)
 	}
 
 	if cutoff > 0 {
 		log.Errorf("cutoff %d", cutoff)
-		for i := N - 1; i < len(dataa.Points); i++ {
-			dataa.Points[i].Value = 0.0
+		for i := (N - cutoff) - 1; i < len(dataa.Points); i++ {
+			data.Points[i].Value = 0.0
 		}
 	}
 
-	return dataa, nil
+	return data, nil
 }
 
 type Server struct {
