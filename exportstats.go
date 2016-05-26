@@ -230,6 +230,16 @@ func (ds *Dataset) String() string {
 	return fmt.Sprintf("%s: %s - %v", ds.Name, ds.Timeframe, ds.Points)
 }
 
+type NDataset struct {
+	Name      string     `json:"name"`
+	Timeframe Timeframe  `json:"timeframe"`
+	Points    [][]*Point `json:"points"`
+}
+
+func (ds *NDataset) String() string {
+	return fmt.Sprintf("%s: %s - %v", ds.Name, ds.Timeframe, ds.Points)
+}
+
 type Stat struct {
 	ID      string `json:"id"`
 	Name    string `json:"name"`
@@ -460,6 +470,100 @@ func (db *DB) GetRate(a, b string, tf Timeframe) (*Dataset, error) {
 	return data, nil
 }
 
+func (db *DB) GetNRate(stats []string, tf Timeframe) (*NDataset, error) {
+	var wg sync.WaitGroup
+	results := make([]*Dataset, len(stats))
+	errs := make([]error, 0)
+	var mu sync.Mutex
+	addResFn := func(v *Dataset) {
+		mu.Lock()
+		for i, stat := range stats {
+			if stat == v.Name {
+				results[i] = v
+				break
+			}
+		}
+		mu.Unlock()
+	}
+	addErrFn := func(e error) {
+		mu.Lock()
+		errs = append(errs, e)
+		mu.Unlock()
+	}
+
+	for _, stat := range stats {
+		go func(stat string, tf Timeframe, addResFn func(*Dataset), addErrFn func(error)) {
+			defer wg.Done()
+			for {
+				data, err := db.Get(stat, tf)
+				if err != nil {
+					addErrFn(err)
+				} else {
+					addResFn(data)
+				}
+				return
+			}
+		}(stat, tf, addResFn, addErrFn)
+	}
+
+	wg.Add(len(stats))
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		break
+	case <-time.After(10 * time.Second):
+		return nil, errors.New("Timout")
+	}
+
+	if len(errs) > 0 {
+		return nil, errs[0]
+	}
+
+	log.Println(results)
+
+	start := results[0]
+	N := len(start.Points)
+
+	data := &NDataset{
+		Points: make([][]*Point, len(stats)),
+	}
+
+	for i := 0; i < N; i++ {
+		data.Points[0] = append(data.Points[0], &Point{
+			Value: 1.0,
+			Time:  start.Points[i].Time,
+		})
+	}
+
+	for i := 1; i < len(stats); i++ {
+		set := results[i]
+		data.Points[i] = make([]*Point, 0, N)
+
+		for j := 0; j < N && j < len(set.Points); j++ {
+			pa := start.Points[j]
+			pb := set.Points[j]
+
+			if pa.Time != pb.Time {
+				log.Printf("time didn't match A: %d, B: %d dt: %d", pa.Time, pb.Time, pa.Time-pb.Time)
+				//log.Println("A", i, data.Points)
+				//log.Println("B", i, data.Points)
+			}
+
+			data.Points[i] = append(data.Points[i], &Point{
+				Value: saferate(pa.Value, pb.Value),
+				Time:  pa.Time,
+			})
+		}
+	}
+
+	return data, nil
+}
+
 type Server struct {
 	db *DB
 }
@@ -477,6 +581,7 @@ func (srv *Server) initRoutes() {
 	router := httprouter.New()
 	router.GET("/v1/exportstats/stat/:stat", srv.IndexHandle)
 	router.GET("/v1/exportstats/rate/:stata/:statb", srv.RateHandle)
+	router.GET("/v1/exportstats/nrate/", srv.NRateHandle)
 
 	// global middleware
 	var middleware []func(http.Handler) http.Handler
@@ -492,6 +597,71 @@ func (srv *Server) initRoutes() {
 
 	wrapped := handler.Use(router, middleware...)
 	http.Handle("/", wrapped)
+}
+
+func (srv *Server) NRateHandle(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
+	var tf Timeframe
+
+	if t := r.FormValue("t"); t != "" {
+		_tf, err := ParseTimeframe(t)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		tf = _tf
+	} else {
+		tf = MustParseTimeframe("1 hour @ 1 minute")
+	}
+
+	if start := r.FormValue("start"); start != "" {
+		s, err := strconv.Atoi(start)
+
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		t := time.Unix(int64(s), 0)
+		tf.Start = &t
+	}
+
+	if r.Form == nil {
+		r.ParseForm()
+	}
+
+	stats := r.Form["stat"]
+
+	if len(stats) < 2 {
+		http.Error(w, "Expected at least two `stat` parameters", http.StatusBadRequest)
+		return
+	}
+
+	log.Println("Stats: ", stats)
+
+	data, err := srv.db.GetNRate(stats, tf)
+
+	if err != nil {
+		log.Errorln(err)
+		if err == NotFoundErr {
+			http.Error(w, "Not Found Error", http.StatusNotFound)
+			return
+		}
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+
+	format := r.FormValue("format")
+	log.Println("count", len(data.Points))
+
+	switch format {
+	case "csv":
+		http.Error(w, "csv format not supported", http.StatusBadRequest)
+		return
+	case "json":
+		jsonWriter(w, data.Points)
+	default:
+		fmt.Fprint(w, data)
+	}
 }
 
 func (srv *Server) RateHandle(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
@@ -542,7 +712,7 @@ func (srv *Server) RateHandle(w http.ResponseWriter, r *http.Request, p httprout
 	case "csv":
 		csvWriter(w, data)
 	case "json":
-		jsonWriter(w, data)
+		jsonWriter(w, data.Points)
 	default:
 		fmt.Fprint(w, data)
 	}
@@ -595,17 +765,17 @@ func (srv *Server) IndexHandle(w http.ResponseWriter, r *http.Request, p httprou
 	case "csv":
 		csvWriter(w, data)
 	case "json":
-		jsonWriter(w, data)
+		jsonWriter(w, data.Points)
 	default:
 		fmt.Fprint(w, data)
 	}
 }
 
-func jsonWriter(w http.ResponseWriter, data *Dataset) {
+func jsonWriter(w http.ResponseWriter, data interface{}) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	jsonw := json.NewEncoder(w)
-	err := jsonw.Encode(data.Points)
+	err := jsonw.Encode(data)
 	if err != nil {
 		log.Fatal(err)
 	}
