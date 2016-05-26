@@ -444,12 +444,15 @@ func (db *DB) GetRate(a, b string, tf Timeframe) (*Dataset, error) {
 			//log.Println("B", i, datab.Points)
 		}
 
-		data.Points[i].Value = saferate(pa.Value, pb.Value)
+		data.Points[i] = &Point{
+			Value: saferate(pa.Value, pb.Value),
+			Time:  pa.Time,
+		}
 	}
 
 	if cutoff > 0 {
 		log.Errorf("cutoff %d", cutoff)
-		for i := (N - cutoff) - 1; i < len(dataa.Points); i++ {
+		for i := (N - cutoff) - 1; i < len(data.Points); i++ {
 			data.Points[i].Value = 0.0
 		}
 	}
