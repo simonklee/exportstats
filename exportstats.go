@@ -435,14 +435,16 @@ func (db *DB) GetRate(a, b string, tf Timeframe) (*Dataset, error) {
 		pb := datab.Points[i]
 
 		if pa.Time != pb.Time {
-			// TODO:
-			log.Errorf("time didn't match")
+			log.Printf("time didn't match A: %d, B: %d dt: %d", pa.Time, pb.Time, pa.Time-pb.Time)
+			//log.Println("A", i, dataa.Points)
+			//log.Println("B", i, datab.Points)
 		}
 
 		pa.Value = saferate(pa.Value, pb.Value)
 	}
 
 	if cutoff > 0 {
+		log.Errorf("cutoff %d", cutoff)
 		for i := N - 1; i < len(dataa.Points); i++ {
 			dataa.Points[i].Value = 0.0
 		}
