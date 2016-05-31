@@ -397,9 +397,14 @@ func saferate(a, b float64) float64 {
 	if a <= 0 || b <= 0 {
 		return 0
 	}
+
 	v := 1.0 - ((a - b) / a)
 
-	if v > 1 || v < 0 {
+	if v > 1 {
+		return 1
+	}
+
+	if v < 0 {
 		return 0
 	}
 
@@ -523,8 +528,6 @@ func (db *DB) GetNRate(stats []string, tf Timeframe) (*NDataset, error) {
 	if len(errs) > 0 {
 		return nil, errs[0]
 	}
-
-	log.Println(results)
 
 	start := results[0]
 	N := len(start.Points)
