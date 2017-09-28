@@ -641,7 +641,7 @@ func (srv *Server) NRateHandle(w http.ResponseWriter, r *http.Request, p httprou
 	data, err := srv.db.GetNRate(stats, tf)
 
 	if err != nil {
-		log.Errorln(err)
+		log.Print(err)
 		if err == NotFoundErr {
 			http.Error(w, "Not Found Error", http.StatusNotFound)
 			return
@@ -696,7 +696,7 @@ func (srv *Server) RateHandle(w http.ResponseWriter, r *http.Request, p httprout
 	data, err := srv.db.GetRate(stata, statb, tf)
 
 	if err != nil {
-		log.Errorln(err)
+		log.Print(err)
 		if err == NotFoundErr {
 			http.Error(w, "Not Found: "+stata+" or "+statb, http.StatusNotFound)
 			return
@@ -749,7 +749,7 @@ func (srv *Server) IndexHandle(w http.ResponseWriter, r *http.Request, p httprou
 	data, err := srv.db.Get(stat, tf)
 
 	if err != nil {
-		log.Error(err)
+		log.Print(err)
 		if err == NotFoundErr {
 			http.Error(w, "Not Found: "+stat, http.StatusNotFound)
 			return
