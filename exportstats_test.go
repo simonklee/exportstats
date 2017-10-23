@@ -2,8 +2,19 @@ package exportstats
 
 import (
 	"fmt"
+	"os"
 	"testing"
 )
+
+func getAccessToken(t *testing.T) string {
+	token := os.Getenv("STATHAT_ACCESSTOKEN")
+
+	if token == "" {
+		t.Skip("Missing STATHAT_ACCESSTOKEN")
+	}
+
+	return token
+}
 
 func TestParseTimeframe(t *testing.T) {
 	for i, test := range []struct {
@@ -32,7 +43,7 @@ func TestParseTimeframe(t *testing.T) {
 }
 
 func TestStathatFetcher(t *testing.T) {
-	f := NewStatHatFetcher("OcYTpK5JyVmdyT30y2NX")
+	f := NewStatHatFetcher(getAccessToken(t))
 	ds, err := f.Get("eu.website.load.domready.cnt", MustParseTimeframe("1 hour @ 1 minute"))
 
 	if err != nil {
@@ -43,7 +54,7 @@ func TestStathatFetcher(t *testing.T) {
 }
 
 func TestDB(t *testing.T) {
-	db := NewDB(NewStatHatFetcher("OcYTpK5JyVmdyT30y2NX"))
+	db := NewDB(NewStatHatFetcher(getAccessToken(t)))
 	ds, err := db.Get("eu.website.load.domready.cnt", MustParseTimeframe("1 hour @ 1 minute"))
 
 	if err != nil {
